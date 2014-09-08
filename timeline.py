@@ -69,7 +69,7 @@ class Timeline(object):
         assert isinstance(message, Message.Implementation), message
         assert isinstance(message.authentication, (MemberAuthentication.Implementation, DoubleMemberAuthentication.Implementation)), message.authentication
         assert isinstance(permission, unicode)
-        assert permission in (u"permit", u"authorize", u"revoke", u"undo")
+        assert permission in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
         if isinstance(message.authentication, MemberAuthentication.Implementation):
             # MemberAuthentication
 
@@ -122,6 +122,24 @@ class Timeline(object):
 
                 return self._check(message.authentication.member, message.distribution.global_time, message.resolution, [(message.payload.packet.meta, u"undo")])
 
+            elif message.name == u"dispersy-cancel-other":
+                assert isinstance(message.resolution, LinearResolution.Implementation), message
+                if __debug__:
+                    self._logger.debug("collecting proof for container message dispersy-cancel-other")
+                    self._logger.debug("master-member: %d; my-member: %d",
+                                       message.community.master_member.database_id,
+                                       message.community.my_member.database_id)
+                    self._logger.debug("dispersy-cancel-other created by %d@%d",
+                                       message.authentication.member.database_id,
+                                       message.distribution.global_time)
+                    self._logger.debug("            canceling message by %d@%d (%s, %s)",
+                                       message.payload.member.database_id, message.payload.global_time,
+                                       message.payload.packet.name, message.payload.packet.resolution)
+                    self.printer()
+
+                return self._check(message.authentication.member, message.distribution.global_time, message.resolution,
+                                   [(message.payload.packet.meta, u"cancel")])
+
             else:
                 return self._check(message.authentication.member, message.distribution.global_time, message.resolution, [(message.meta, permission)])
         else:
@@ -143,7 +161,7 @@ class Timeline(object):
         assert isinstance(global_time, (int, long))
         assert global_time >= 0
         assert isinstance(permission, unicode)
-        assert permission in (u"permit", u"authorize", u"revoke", u"undo")
+        assert permission in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
         return self._check(self._community.my_member, global_time if global_time else self._community.global_time, meta.resolution, [(meta, permission)])
 
     def _check(self, member, global_time, resolution, permission_pairs):
@@ -165,7 +183,7 @@ class Timeline(object):
             assert len(pair) == 2
             assert isinstance(pair[0], Message), "Requires meta message"
             assert isinstance(pair[1], unicode)
-            assert pair[1] in (u"permit", u"authorize", u"revoke", u"undo")
+            assert pair[1] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
         assert isinstance(resolution, (PublicResolution.Implementation, LinearResolution.Implementation, DynamicResolution.Implementation, PublicResolution, LinearResolution, DynamicResolution)), resolution
 
         # TODO: we can make this more efficient by changing the loop a bit.  make a shallow copy of
@@ -272,9 +290,10 @@ class Timeline(object):
             assert isinstance(triplet[1].resolution, (PublicResolution, LinearResolution, DynamicResolution))
             assert isinstance(triplet[1].authentication, (MemberAuthentication, DoubleMemberAuthentication))
             assert isinstance(triplet[2], unicode)
-            assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo")
+            assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
         assert isinstance(proof, Message.Implementation)
-        assert proof.name in (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other")
+        assert proof.name in (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other",
+                              u"dispersy-cancel-own", u"dispersy-cancel-other")
 
         # check that AUTHOR is allowed to perform authorizations for these messages
         messages = set(message for _, message, _ in permission_triplets)
@@ -354,9 +373,10 @@ class Timeline(object):
             assert isinstance(triplet[1].resolution, (PublicResolution, LinearResolution, DynamicResolution))
             assert isinstance(triplet[1].authentication, (MemberAuthentication, DoubleMemberAuthentication))
             assert isinstance(triplet[2], unicode)
-            assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo")
+            assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
         assert isinstance(proof, Message.Implementation)
-        assert proof.name in (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other")
+        assert proof.name in (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other",
+                              u"dispersy-cancel-own", u"dispersy-cancel-other")
 
         # TODO: we must remove duplicates in the below permission_pairs list
         # check that AUTHOR is allowed to perform these authorizations
