@@ -353,7 +353,7 @@ class AuthorizePayload(Payload):
                     assert isinstance(triplet[1].resolution, (PublicResolution, LinearResolution, DynamicResolution)), triplet[1]
                     assert isinstance(triplet[1].authentication, (MemberAuthentication, DoubleMemberAuthentication)), triplet[1]
                     assert isinstance(triplet[2], unicode), triplet[2]
-                    assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo"), triplet[2]
+                    assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel"), triplet[2]
             super(AuthorizePayload.Implementation, self).__init__(meta)
             self._permission_triplets = permission_triplets
 
@@ -386,7 +386,7 @@ class RevokePayload(Payload):
                 assert isinstance(triplet[1].resolution, (PublicResolution, LinearResolution, DynamicResolution)), triplet
                 assert isinstance(triplet[1].authentication, (MemberAuthentication, DoubleMemberAuthentication)), triplet
                 assert isinstance(triplet[2], unicode), triplet
-                assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo"), triplet
+                assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel"), triplet
             super(RevokePayload.Implementation, self).__init__(meta)
             self._permission_triplets = permission_triplets
 
@@ -419,6 +419,50 @@ class UndoPayload(Payload):
         @process_undo.setter
         def process_undo(self, enabled=True):
             self._process_undo = enabled
+
+        @property
+        def member(self):
+            return self._member
+
+        @property
+        def global_time(self):
+            return self._global_time
+
+        @property
+        def packet(self):
+            return self._packet
+
+        @packet.setter
+        def packet(self, packet):
+            from .message import Packet
+            assert isinstance(packet, Packet), type(packet)
+            self._packet = packet
+
+
+class CancelPayload(Payload):
+
+    class Implementation(Payload.Implementation):
+
+        def __init__(self, meta, member, global_time, packet=None):
+            from .member import Member
+            from .message import Packet
+            assert isinstance(member, Member)
+            assert isinstance(global_time, (int, long))
+            assert packet is None or isinstance(packet, Packet)
+            assert global_time > 0
+            super(CancelPayload.Implementation, self).__init__(meta)
+            self._member = member
+            self._global_time = global_time
+            self._packet = packet
+            self._process_cancel = True
+
+        @property
+        def process_cancel(self):
+            return self._process_cancel
+
+        @process_cancel.setter
+        def process_cancel(self, enabled=True):
+            self._process_cancel = enabled
 
         @property
         def member(self):
