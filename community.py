@@ -31,10 +31,10 @@ from .exception import ConversionNotFoundException, MetaNotFoundException
 from .member import DummyMember, Member
 from .message import (BatchConfiguration, Message, Packet, DropMessage, DelayMessageByProof,
                       DelayMessageByMissingMessage, DropPacket, DelayPacket, DelayMessage)
-from .payload import (AuthorizePayload, RevokePayload, UndoPayload, DestroyCommunityPayload, DynamicSettingsPayload,
-                      IdentityPayload, MissingIdentityPayload, IntroductionRequestPayload, IntroductionResponsePayload,
-                      PunctureRequestPayload, PuncturePayload, MissingMessagePayload, MissingSequencePayload,
-                      MissingProofPayload, SignatureRequestPayload, SignatureResponsePayload)
+from .payload import (AuthorizePayload, RevokePayload, UndoPayload, CancelPayload, DestroyCommunityPayload,
+                      DynamicSettingsPayload, IdentityPayload, MissingIdentityPayload, IntroductionRequestPayload,
+                      IntroductionResponsePayload, PunctureRequestPayload, PuncturePayload, MissingMessagePayload,
+                      MissingSequencePayload, MissingProofPayload, SignatureRequestPayload, SignatureResponsePayload)
 from .requestcache import RequestCache, SignatureRequestCache, IntroductionRequestCache
 from .resolution import PublicResolution, LinearResolution, DynamicResolution
 from .statistics import CommunityStatistics
@@ -137,7 +137,8 @@ class Community(TaskManager):
 
         # authorize MY_MEMBER
         permission_triplets = []
-        message_names = (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other")
+        message_names = (u"dispersy-authorize", u"dispersy-revoke", u"dispersy-undo-own", u"dispersy-undo-other",
+                         u"dispersy-cancel-own", u"dispersy-cancel-other")
         for message in community.get_meta_messages():
             # grant all permissions for messages that use LinearResolution or DynamicResolution
             if isinstance(message.resolution, (LinearResolution, DynamicResolution)):
@@ -151,6 +152,11 @@ class Community(TaskManager):
                     if not message.name in message_names:
                         permission_triplets.append((my_member, message, u"undo"))
 
+                # ensure that cancel_callback is available
+                if message.cancel_callback:
+                    if not message.name in message_names:
+                        permission_triplets.append((my_member, message, u"cancel"))
+
             # grant authorize, revoke, and undo permission for messages that use PublicResolution
             # and SyncDistribution.  Why?  The undo permission allows nodes to revoke a specific
             # message that was gossiped around.  The authorize permission is required to grant other
@@ -160,10 +166,18 @@ class Community(TaskManager):
             elif isinstance(message.distribution, SyncDistribution) and isinstance(message.resolution, PublicResolution):
                 # ensure that undo_callback is available
                 if message.undo_callback:
-                    # we do not support undo permissions for authorize, revoke, undo-own, and
-                    # undo-other (yet)
+                    # we do not support undo and cancel permissions for authorize, revoke, undo-own, undo-other,
+                    # cancel-own, and cancel-other (yet)
                     if not message.name in message_names:
-                        for allowed in (u"authorize", u"revoke", u"undo"):
+                        for allowed in (u"authorize", u"revoke", u"undo", u"cancel"):
+                            permission_triplets.append((my_member, message, allowed))
+
+                # ensure that cancel_callback is available
+                if message.cancel_callback:
+                    # we do not support undo and cancel permissions for authorize, revoke, undo-own, undo-other,
+                    # cancel-own, and cancel-other (yet)
+                    if not message.name in message_names:
+                        for allowed in (u"authorize", u"revoke", u"undo", u"cancel"):
                             permission_triplets.append((my_member, message, allowed))
 
         if permission_triplets:
@@ -1715,6 +1729,22 @@ class Community(TaskManager):
                     UndoPayload(),
                     self.check_undo,
                     self.on_undo),
+            Message(self, u"dispersy-cancel-own",
+                    MemberAuthentication(),
+                    PublicResolution(),
+                    FullSyncDistribution(enable_sequence_number=False, synchronization_direction=u"ASC", priority=128),
+                    CommunityDestination(node_count=10),
+                    CancelPayload(),
+                    self.check_cancel,
+                    self.on_cancel),
+            Message(self, u"dispersy-cancel-other",
+                    MemberAuthentication(),
+                    LinearResolution(),
+                    FullSyncDistribution(enable_sequence_number=False, synchronization_direction=u"ASC", priority=128),
+                    CommunityDestination(node_count=10),
+                    CancelPayload(),
+                    self.check_cancel,
+                    self.on_cancel),
             Message(self, u"dispersy-destroy-community",
                     MemberAuthentication(),
                     LinearResolution(),
@@ -3169,7 +3199,7 @@ class Community(TaskManager):
                 assert isinstance(triplet[0], Member)
                 assert isinstance(triplet[1], Message)
                 assert isinstance(triplet[2], unicode)
-                assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo")
+                assert triplet[2] in (u"permit", u"authorize", u"revoke", u"undo", u"cancel")
 
         meta = self.get_meta_message(u"dispersy-authorize")
         message = meta.impl(authentication=((self.master_member if sign_with_master else self.my_member),),
@@ -3281,6 +3311,118 @@ class Community(TaskManager):
             for meta, globaltime_range in changes.iteritems():
                 self._update_timerange(meta, globaltime_range[0], globaltime_range[1])
 
+    def create_cancel(self, message, sign_with_master=False, store=True, update=True, forward=True):
+        """
+        Creates a cancel message to end the loop of undo messages.
+
+        A CANCEL message simply cancels another message and that's it. If a
+        person wants to enable the message that has been canceled, he has to
+        create a new message with exactly the same content again.
+        """
+        if __debug__:
+            assert isinstance(message, Message.Implementation)
+            assert isinstance(sign_with_master, bool)
+            assert isinstance(store, bool)
+            assert isinstance(update, bool)
+            assert isinstance(forward, bool)
+            assert message.cancel_callback, "message does not allow cancel"
+            assert not message.name in (u"dispersy-cancel-own", u"dispersy-cancel-other",
+                                        u"dispersy-undo-own", u"dispersy-undo-other",
+                                        u"dispersy-authorize", u"dispersy-revoke"),\
+                "Currently we do NOT support canceling any of these, as it has consequences for other messages"
+
+        # check and make sure that we cancel a message only once.
+        try:
+            undone, = self._dispersy._database.execute(
+                u"SELECT undone FROM sync WHERE community = ? AND member = ? AND global_time = ?",
+                (self.database_id, message.authentication.member.database_id, message.distribution.global_time)).next()
+
+        except StopIteration:
+            assert False, "The message that we want to cancel does not exist.  Programming error"
+            return
+
+        if undone:
+            self._logger.error(u"Attempting to CANCEL the same message twice. Do nothing.")
+            raise RuntimeError(u"Attempting to CANCEL the same message twice. Do nothing.")
+            return
+
+        # create the cancel message
+        meta = self.get_meta_message(u"dispersy-cancel-own" if self.my_member == message.authentication.member
+                                     and not sign_with_master else u"dispersy-cancel-other")
+        msg = meta.impl(authentication=((self.master_member if sign_with_master else self.my_member),),
+                        distribution=(self.claim_global_time(),),
+                        payload=(message.authentication.member, message.distribution.global_time, message))
+
+        if __debug__:
+            assert msg.distribution.global_time > message.distribution.global_time
+            allowed, _ = self.timeline.check(msg)
+            assert allowed, "create_cancel was called without having the permission to cancel"
+
+        self._dispersy.store_update_forward([msg], store, update, forward)
+        return msg
+
+    def check_cancel(self, messages):
+        # Note: previously all MESSAGES have been checked to ensure that the sequence numbers are
+        # correct.  this check takes into account the messages in the batch.  hence, if one of these
+        # messages is dropped or delayed it can invalidate the sequence numbers of the other
+        # messages in this batch!
+
+        assert all(message.name in (u"dispersy-cancel-own", u"dispersy-cancel-other") for message in messages)
+
+        for message in messages:
+            if message.payload.packet is None:
+                # obtain the packet that we are attempting to cancel
+                try:
+                    packet_id, message_name, packet_data = self._dispersy._database.execute(
+                        u"SELECT sync.id, meta_message.name, sync.packet FROM sync"
+                        u" JOIN meta_message ON meta_message.id = sync.meta_message"
+                        u" WHERE sync.community = ? AND sync.member = ? AND sync.global_time = ?",
+                        (self.database_id, message.payload.member.database_id, message.payload.global_time)).next()
+                except StopIteration:
+                    delay = DelayMessageByMissingMessage(message, message.payload.member, message.payload.global_time)
+                    yield delay
+                    continue
+
+                message.payload.packet = Packet(self.get_meta_message(message_name), str(packet_data), packet_id)
+
+            # ensure that the message in the payload allows cancel
+            if not message.payload.packet.meta.cancel_callback:
+                drop = DropMessage(message, "message does not allow cancel")
+                yield drop
+                continue
+
+            # check the timeline
+            allowed, _ = message.community.timeline.check(message)
+            if not allowed:
+                delay = DelayMessageByProof(message)
+                yield delay
+                continue
+
+            yield message
+
+    def on_cancel(self, messages):
+        """
+        Cancels a single message.
+        """
+        assert all(message.name in (u"dispersy-cancel-own", u"dispersy-cancel-other") for message in messages)
+
+        # We first need to extract the DispersyDuplicatedUndo objects from the messages list and deal with them
+        real_messages = list()
+        parameters = list()
+        for message in messages:
+            if isinstance(message, Message.Implementation) and message.payload.process_cancel:
+                # That's a normal cancel message
+                parameters.append((message.packet_id, self.database_id, message.payload.member.database_id,
+                                   message.payload.global_time))
+                real_messages.append(message)
+
+        self._dispersy._database.executemany(u"UPDATE sync SET undone = ? "
+                                             u"WHERE community = ? AND member = ? AND global_time = ?", parameters)
+
+        for meta, sub_messages in groupby(real_messages, key=lambda x: x.payload.packet.meta):
+            meta.cancel_callback([(message.payload.member, message.payload.global_time, message.payload.packet)
+                                  for message in sub_messages])
+
     def create_undo(self, message, sign_with_master=False, store=True, update=True, forward=True):
         """
         Create a dispersy-undo-own or dispersy-undo-other message to undo MESSAGE.
@@ -3301,7 +3443,10 @@ class Community(TaskManager):
             assert isinstance(update, bool)
             assert isinstance(forward, bool)
             assert message.undo_callback, "message does not allow undo"
-            assert not message.name in (u"dispersy-undo-own", u"dispersy-undo-other", u"dispersy-authorize", u"dispersy-revoke"), "Currently we do NOT support undoing any of these, as it has consequences for other messages"
+            assert not message.name in (u"dispersy-undo-own", u"dispersy-undo-other",
+                                        u"dispersy-authorize", u"dispersy-revoke",
+                                        u"dispersy-cancel-own", u"dispersy-cancel-other"),\
+                "Currently we do NOT support undoing any of these, as it has consequences for other messages"
 
         # creating a second dispersy-undo for the same message is malicious behavior (it can cause
         # infinate data traffic).  nodes that notice this behavior must blacklist the offending
