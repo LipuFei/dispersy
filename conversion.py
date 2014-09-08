@@ -425,7 +425,8 @@ class NoDefBinaryConversion(Conversion):
            ]
         ]
         """
-        permission_map = {u"permit": int("0001", 2), u"authorize": int("0010", 2), u"revoke": int("0100", 2), u"undo": int("1000", 2)}
+        permission_map = {u"permit": int("00001", 2), u"authorize": int("00010", 2), u"revoke": int("00100", 2),
+                          u"undo": int("01000", 2), u"cancel": int("10000", 2)}
         members = {}
         for member, message, permission in message.payload.permission_triplets:
             public_key = member.public_key
@@ -454,7 +455,8 @@ class NoDefBinaryConversion(Conversion):
         return tuple(data)
 
     def _decode_authorize(self, placeholder, offset, data):
-        permission_map = {u"permit": int("0001", 2), u"authorize": int("0010", 2), u"revoke": int("0100", 2), u"undo": int("1000", 2)}
+        permission_map = {u"permit": int("00001", 2), u"authorize": int("00010", 2), u"revoke": int("00100", 2),
+                          u"undo": int("01000", 2), u"cancel": int("10000", 2)}
         permission_triplets = []
 
         while offset < len(data):
@@ -521,7 +523,8 @@ class NoDefBinaryConversion(Conversion):
            ]
         ]
         """
-        permission_map = {u"permit": int("0001", 2), u"authorize": int("0010", 2), u"revoke": int("0100", 2), u"undo": int("1000", 2)}
+        permission_map = {u"permit": int("00001", 2), u"authorize": int("00010", 2), u"revoke": int("00100", 2),
+                          u"undo": int("01000", 2), u"cancel": int("10000", 2)}
         members = {}
         for member, message, permission in message.payload.permission_triplets:
             public_key = member.public_key
@@ -550,7 +553,8 @@ class NoDefBinaryConversion(Conversion):
         return tuple(data)
 
     def _decode_revoke(self, placeholder, offset, data):
-        permission_map = {u"permit": int("0001", 2), u"authorize": int("0010", 2), u"revoke": int("0100", 2), u"undo": int("1000", 2)}
+        permission_map = {u"permit": int("00001", 2), u"authorize": int("00010", 2), u"revoke": int("00100", 2),
+                          u"undo": int("01000", 2), u"cancel": int("10000", 2)}
         permission_triplets = []
 
         while offset < len(data):
@@ -598,6 +602,57 @@ class NoDefBinaryConversion(Conversion):
                         permission_triplets.append((member, message, permission))
 
         return offset, placeholder.meta.payload.Implementation(placeholder.meta.payload, permission_triplets)
+
+    def _encode_cancel_own(self, message):
+        return self._struct_Q.pack(message.payload.global_time),
+
+    def _decode_cancel_own(self, placeholder, offset, data):
+        # use the member in the Authentication policy
+        member = placeholder.authentication.member
+
+        if len(data) < offset + 8:
+            raise DropPacket("Insufficient packet size")
+
+        global_time, = self._struct_Q.unpack_from(data, offset)
+        offset += 8
+
+        if not global_time < placeholder.distribution.global_time:
+            raise DropPacket("Invalid global time (trying to apply undo to the future)")
+
+        return offset, placeholder.meta.payload.Implementation(placeholder.meta.payload, member, global_time)
+
+    def _encode_cancel_other(self, message):
+        public_key = message.payload.member.public_key
+        assert message.payload.member.public_key
+        return self._struct_H.pack(len(public_key)), public_key, self._struct_Q.pack(message.payload.global_time)
+
+    def _decode_cancel_other(self, placeholder, offset, data):
+        if len(data) < offset + 2:
+            raise DropPacket("Insufficient packet size")
+
+        key_length, = self._struct_H.unpack_from(data, offset)
+        offset += 2
+
+        if len(data) < offset + key_length:
+            raise DropPacket("Insufficient packet size")
+
+        public_key = data[offset:offset + key_length]
+        try:
+            member = self._community.dispersy.get_member(public_key=public_key)
+        except:
+            raise DropPacket("Invalid cryptographic key (_decode_revoke)")
+        offset += key_length
+
+        if len(data) < offset + 8:
+            raise DropPacket("Insufficient packet size")
+
+        global_time, = self._struct_Q.unpack_from(data, offset)
+        offset += 8
+
+        if not global_time < placeholder.distribution.global_time:
+            raise DropPacket("Invalid global time (trying to apply undo to the future)")
+
+        return offset, placeholder.meta.payload.Implementation(placeholder.meta.payload, member, global_time)
 
     def _encode_undo_own(self, message):
         return (self._struct_Q.pack(message.payload.global_time),)
@@ -1322,6 +1377,8 @@ class BinaryConversion(NoDefBinaryConversion):
         define(237, u"dispersy-undo-other", self._encode_undo_other, self._decode_undo_other)
         define(236, u"dispersy-dynamic-settings", self._encode_dynamic_settings, self._decode_dynamic_settings)
         # 235 for obsolete dispersy-missing-last-message
+        define(234, u"dispersy-cancel-own", self._encode_cancel_own, self._decode_cancel_own)
+        define(233, u"dispersy-cancel-other", self._encode_cancel_other, self._decode_cancel_other)
 
         if __debug__:
             if debug_non_available:
