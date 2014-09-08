@@ -282,6 +282,10 @@ class Packet(MetaObject.Implementation):
         return self._meta._undo_callback
 
     @property
+    def cancel_callback(self):
+        return self._meta._cancel_callback
+
+    @property
     def priority(self):
         return self._meta._priority
 
@@ -422,7 +426,8 @@ class Message(MetaObject):
         def __str__(self):
             return "<%s.%s %s>" % (self._meta.__class__.__name__, self.__class__.__name__, self._meta._name)
 
-    def __init__(self, community, name, authentication, resolution, distribution, destination, payload, check_callback, handle_callback, undo_callback=None, batch=None):
+    def __init__(self, community, name, authentication, resolution, distribution, destination, payload,
+                 check_callback, handle_callback, undo_callback=None, cancel_callback=None, batch=None):
         from .community import Community
         assert isinstance(community, Community), "COMMUNITY has invalid type '%s'" % type(community)
         assert isinstance(name, unicode), "NAME has invalid type '%s'" % type(name)
@@ -434,6 +439,8 @@ class Message(MetaObject):
         assert callable(check_callback), type(check_callback)
         assert callable(handle_callback), type(handle_callback)
         assert undo_callback is None or callable(undo_callback), undo_callback
+        assert cancel_callback is None or callable(cancel_callback),\
+            "cancel_callback is not a callable: %s" % type(cancel_callback)
         if isinstance(resolution, DynamicResolution):
             assert callable(undo_callback), "UNDO_CALLBACK must be specified when using the DynamicResolution policy"
         assert batch is None or isinstance(batch, BatchConfiguration), type(batch)
@@ -448,6 +455,7 @@ class Message(MetaObject):
         self._check_callback = check_callback
         self._handle_callback = handle_callback
         self._undo_callback = undo_callback
+        self._cancel_callback = cancel_callback
         self._batch = BatchConfiguration() if batch is None else batch
         self._logger = logging.getLogger(self.__class__.__name__)
 
@@ -505,6 +513,10 @@ class Message(MetaObject):
     @property
     def undo_callback(self):
         return self._undo_callback
+
+    @property
+    def cancel_callback(self):
+        return self._cancel_callback
 
     @property
     def batch(self):
