@@ -355,6 +355,28 @@ class DebugNode(object):
     assert_is_done = assert_is_stored
 
     @blocking_call_on_reactor_thread
+    def assert_is_canceled(self, message=None, messages=None, canceled_by=None):
+        if messages is None:
+            messages = [message]
+
+        for message in messages:
+            try:
+                undone, = self._dispersy.database.execute(
+                    u"SELECT undone FROM sync, member"
+                    u" WHERE sync.member = member.id AND community = ? AND mid = ? AND global_time = ?",
+                    (self._community.database_id, buffer(message.authentication.member.mid),
+                     message.distribution.global_time)).next()
+                self._testclass.assertGreater(undone, 0, "Message is not canceled")
+                if canceled_by:
+                    undone, = self._dispersy.database.execute(
+                        u"SELECT packet FROM sync WHERE id = ? ",
+                        (undone,)).next()
+                    self._testclass.assertEqual(str(undone), canceled_by.packet)
+
+            except StopIteration:
+                self._testclass.fail("Message is not stored")
+
+    @blocking_call_on_reactor_thread
     def assert_is_undone(self, message=None, messages=None, undone_by=None):
         if messages == None:
             messages = [message]
@@ -472,6 +494,36 @@ class DebugNode(object):
             global_time = self.claim_global_time()
 
         return meta.impl(authentication=(self._my_member,), distribution=(global_time,))
+
+    @blocking_call_on_reactor_thread
+    def create_cancel_own(self, message, global_time=None):
+        """
+        Returns a new dispersy-cancel-own message.
+        """
+        assert message.authentication.member == self._my_member, "use create_dispersy_cancel_other"
+        meta = self._community.get_meta_message(u"dispersy-cancel-own")
+
+        if global_time is None:
+            global_time = self.claim_global_time()
+
+        return meta.impl(authentication=(self._my_member,),
+                         distribution=(global_time,),
+                         payload=(message.authentication.member, message.distribution.global_time, message))
+
+    @blocking_call_on_reactor_thread
+    def create_cancel_other(self, message, global_time=None):
+        """
+        Returns a new dispersy-cancel-other message.
+        """
+        meta = self._community.get_meta_message(u"dispersy-cancel-other")
+
+        if global_time is None:
+            global_time = self.claim_global_time()
+
+        return meta.impl(authentication=(self._my_member,),
+                         distribution=(global_time,),
+                         payload=(message.authentication.member, message.distribution.global_time, message))
+
 
     @blocking_call_on_reactor_thread
     def create_undo_own(self, message, global_time=None, sequence_number=None):

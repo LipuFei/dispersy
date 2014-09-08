@@ -76,7 +76,8 @@ class DebugCommunity(Community):
                         TextPayload(),
                         self._generic_timeline_check,
                         self.on_text,
-                        self.undo_text),
+                        undo_callback=self.undo_text,
+                        cancel_callback=self.cancel_text),
                 Message(self, u"bin-key-text",
                         MemberAuthentication(encoding="bin"),
                         PublicResolution(),
@@ -85,7 +86,8 @@ class DebugCommunity(Community):
                         TextPayload(),
                         self._generic_timeline_check,
                         self.on_text,
-                        self.undo_text),
+                        undo_callback=self.undo_text,
+                        cancel_callback=self.cancel_text),
                 Message(self, u"ASC-text",
                         MemberAuthentication(),
                         PublicResolution(),
@@ -119,7 +121,8 @@ class DebugCommunity(Community):
                         TextPayload(),
                         self._generic_timeline_check,
                         self.on_text,
-                        self.undo_text),
+                        undo_callback=self.undo_text,
+                        cancel_callback=self.cancel_text),
                 Message(self, u"sequence-text",
                         MemberAuthentication(),
                         PublicResolution(),
@@ -128,7 +131,8 @@ class DebugCommunity(Community):
                         TextPayload(),
                         self._generic_timeline_check,
                         self.on_text,
-                        self.undo_text),
+                        undo_callback=self.undo_text,
+                        cancel_callback=self.cancel_text),
                 Message(self, u"full-sync-global-time-pruning-text",
                         MemberAuthentication(),
                         PublicResolution(),
@@ -137,7 +141,8 @@ class DebugCommunity(Community):
                         TextPayload(),
                         self._generic_timeline_check,
                         self.on_text,
-                        self.undo_text),
+                        undo_callback=self.undo_text,
+                        cancel_callback=self.cancel_text),
                 Message(self, u"high-priority-text",
                         MemberAuthentication(),
                         PublicResolution(),
@@ -220,6 +225,14 @@ class DebugCommunity(Community):
         for member, global_time, packet in descriptors:
             message = packet.load_message()
             self._logger.debug("undo \"%s\" @%d", message.payload.text, global_time)
+
+    def cancel_text(self, descriptors):
+        """
+        Received a cancel for a text message.
+        """
+        for member, global_time, packet in descriptors:
+            message = packet.load_message()
+            self._logger.debug("cancel \"%s\" @%d", message.payload.text, global_time)
 
     def dispersy_cleanup_community(self, message):
         if message.payload.is_soft_kill:
