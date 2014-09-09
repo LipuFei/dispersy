@@ -3406,15 +3406,88 @@ class Community(TaskManager):
         """
         assert all(message.name in (u"dispersy-cancel-own", u"dispersy-cancel-other") for message in messages)
 
-        # We first need to extract the DispersyDuplicatedUndo objects from the messages list and deal with them
-        real_messages = list()
-        parameters = list()
+        # Check the cancel messages we have got and only update the database with the latest one
+        # (which is the message with the biggest mid and global_time)
+        # check the cancel messages grouped by the message they cancel
+        categoried_msg_dict = dict()
         for message in messages:
             if isinstance(message, Message.Implementation) and message.payload.process_cancel:
                 # That's a normal cancel message
-                parameters.append((message.packet_id, self.database_id, message.payload.member.database_id,
-                                   message.payload.global_time))
-                real_messages.append(message)
+                #parameters.append((message.packet_id, self.database_id, message.payload.member.database_id,
+                #                   message.payload.global_time))
+                key = (message.payload.global_time, message.payload.member.mid)
+                if key not in categoried_msg_dict:
+                    categoried_msg_dict[key] = dict()
+                    categoried_msg_dict[key]["messages"] = list()
+
+                    # try to load the cancel message we have in the database
+                    undone, = self._dispersy._database.execute(
+                        u"SELECT undone FROM sync WHERE community = ? AND member = ? AND global_time = ?",
+                        (self.database_id, message.payload.member.database_id, message.payload.global_time)).next()
+                    if undone != 0:
+                        try:
+                            mid, global_time = self._dispersy._database.execute(
+                                u"SELECT member.mid, sync.global_time FROM sync"
+                                u" JOIN meta_message ON meta_message.id == sync.meta_message"
+                                u" JOIN member ON member.id == sync.member"
+                                u" WHERE meta_message.name == 'CancelMessage' AND sync.id == ?", (undone,)).next()
+                        except StopIteration:
+                            # no previous cancel for this message
+                            pass
+                        else:
+                            categoried_msg_dict[key]["cancel_in_db"] = (global_time, mid, undone)
+
+                categoried_msg_dict[key]["messages"].append(message)
+
+        # for each message to be canceled, check the cancel messages member global_time and mid
+        # (the larger the later), and we only use the latest one.
+        # The logic is that:
+        # (1) if the latest message is already in our database:
+        #     (a) we will store the messages we have received,
+        #     (b) and send the latest message to all the others because they don't have the latest message.
+        # (2) if the latest message is one of the messages we have received:
+        #     (a) we will store the messages we have received,
+        #     (b) update the undone with the latest message id,
+        #     (c) and send the latest message to the others whose don't have have the latest message.
+        parameters = list()
+        real_messages = list()
+        for key, item in categoried_msg_dict.iteritems():
+            all_item_list = [(msg.payload.global_time, msg.payload.member.mid, msg.packet_id)
+                             for msg in item["messages"]]
+
+            # add the database msg if it exists
+            if item.get("cancel_in_db", None):
+                assert (item["cancel_in_db"][0], item["cancel_in_db"][1], None) not in all_item_list,\
+                    "There are duplicate cancel messages with the one in DB!!!"
+                all_item_list.append(item["cancel_in_db"])
+
+            # sort and get the latest one
+            all_item_list.sort()
+            the_latest_one = all_item_list[-1]
+            if not item.get("cancel_in_db", None) or the_latest_one[-1] != item["cancel_in_db"][-1]:
+                # need to update the undone pointer in database
+                undone_ptr = the_latest_one[-1]
+                for msg in item["messages"]:
+                    if msg.packet_id == undone_ptr:
+                        the_latest_msg = msg
+                        break
+
+                parameters.append((undone_ptr, self.database_id, the_latest_msg.payload.member.database_id,
+                                   the_latest_msg.payload.global_time))
+                real_messages.append(the_latest_msg)
+
+            # send the latest packet to other people
+            the_latest_packet_id = the_latest_one[-1]
+            try:
+                the_latest_packet = self._dispersy._database.execute(u"SELECT packet FROM sync WHERE id = ?",
+                                                                     (the_latest_one[-1],)).next()
+            except StopIteration:
+                pass
+            else:
+                for msg in item["messages"]:
+                    if msg.packet_id != the_latest_packet_id:
+                        self._dispersy._send_packets([msg.candidate], [str(the_latest_packet)],
+                                                     self, "-caused by on_cancel-")
 
         self._dispersy._database.executemany(u"UPDATE sync SET undone = ? "
                                              u"WHERE community = ? AND member = ? AND global_time = ?", parameters)
