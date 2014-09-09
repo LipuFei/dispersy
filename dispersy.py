@@ -1274,7 +1274,7 @@ WHERE sync.meta_message = ? AND double_signed_sync.member1 = ? AND double_signed
         # refuse messages that have been pruned (or soon will be)
         messages = [DropMessage(message, "message has been pruned") if isinstance(message, Message.Implementation) and not message.distribution.pruning.is_active() else message for message in messages]
 
-        # for meta data messages
+        # for metadata messages
         if meta.distribution.custom_callback:
             unique = set()
             times = {}
