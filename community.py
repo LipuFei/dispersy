@@ -147,12 +147,12 @@ class Community(TaskManager):
 
                 # ensure that undo_callback is available
                 if message.undo_callback:
-                    # we do not support undo permissions for authorize, revoke, undo-own, and
-                    # undo-other (yet)
+                    # we do not support undo permissions for authorize, revoke, undo-own, undo-other,
+                    # cancel-own, and cancel-other (yet)
                     if not message.name in message_names:
                         permission_triplets.append((my_member, message, u"undo"))
 
-                # ensure that cancel_callback is available
+                # TODO: This is a DUPLICATE of undo, add comments after we remove undo.
                 if message.cancel_callback:
                     if not message.name in message_names:
                         permission_triplets.append((my_member, message, u"cancel"))
@@ -166,19 +166,18 @@ class Community(TaskManager):
             elif isinstance(message.distribution, SyncDistribution) and isinstance(message.resolution, PublicResolution):
                 # ensure that undo_callback is available
                 if message.undo_callback:
-                    # we do not support undo and cancel permissions for authorize, revoke, undo-own, undo-other,
+                    # we do not support undo permissions for authorize, revoke, undo-own, undo-other,
                     # cancel-own, and cancel-other (yet)
                     if not message.name in message_names:
-                        for allowed in (u"authorize", u"revoke", u"undo", u"cancel"):
+                        for allowed in (u"authorize", u"revoke", u"undo"):
                             permission_triplets.append((my_member, message, allowed))
 
-                # ensure that cancel_callback is available
-                if message.cancel_callback:
-                    # we do not support undo and cancel permissions for authorize, revoke, undo-own, undo-other,
-                    # cancel-own, and cancel-other (yet)
+                # TODO: This is a DUPLICATE of undo, add comments after we remove undo.
+                if message.undo_callback:
                     if not message.name in message_names:
-                        for allowed in (u"authorize", u"revoke", u"undo", u"cancel"):
-                            permission_triplets.append((my_member, message, allowed))
+                        for allowed in (u"authorize", u"revoke", u"cancel"):
+                            if (my_member, message, allowed) not in permission_triplets:
+                                permission_triplets.append((my_member, message, allowed))
 
         if permission_triplets:
             community.create_authorize(permission_triplets, sign_with_master=True, forward=False)
@@ -3426,16 +3425,15 @@ class Community(TaskManager):
                         (self.database_id, message.payload.member.database_id, message.payload.global_time)).next()
                     if undone != 0:
                         try:
-                            mid, global_time = self._dispersy._database.execute(
-                                u"SELECT member.mid, sync.global_time FROM sync"
+                            packet, = self._dispersy._database.execute(
+                                u"SELECT sync.packet FROM sync"
                                 u" JOIN meta_message ON meta_message.id == sync.meta_message"
-                                u" JOIN member ON member.id == sync.member"
-                                u" WHERE meta_message.name == 'CancelMessage' AND sync.id == ?", (undone,)).next()
-                        except StopIteration:
+                                u" WHERE meta_message.name LIKE 'dispersy-cancel-%' AND sync.id == ?", (undone,)).next()
+                        except StopIteration as ex:
                             # no previous cancel for this message
                             pass
                         else:
-                            categoried_msg_dict[key]["cancel_in_db"] = (global_time, mid, undone)
+                            categoried_msg_dict[key]["cancel_in_db"] = (str(packet), undone)
 
                 categoried_msg_dict[key]["messages"].append(message)
 
@@ -3452,8 +3450,7 @@ class Community(TaskManager):
         parameters = list()
         real_messages = list()
         for key, item in categoried_msg_dict.iteritems():
-            all_item_list = [(msg.payload.global_time, msg.payload.member.mid, msg.packet_id)
-                             for msg in item["messages"]]
+            all_item_list = [(msg.packet, msg.packet_id) for msg in item["messages"]]
 
             # add the database msg if it exists
             if item.get("cancel_in_db", None):
@@ -3463,6 +3460,7 @@ class Community(TaskManager):
 
             # sort and get the latest one
             all_item_list.sort()
+            self._logger.debug("!!! %s", all_item_list)
             the_latest_one = all_item_list[-1]
             if not item.get("cancel_in_db", None) or the_latest_one[-1] != item["cancel_in_db"][-1]:
                 # need to update the undone pointer in database
@@ -3479,8 +3477,8 @@ class Community(TaskManager):
             # send the latest packet to other people
             the_latest_packet_id = the_latest_one[-1]
             try:
-                the_latest_packet = self._dispersy._database.execute(u"SELECT packet FROM sync WHERE id = ?",
-                                                                     (the_latest_one[-1],)).next()
+                the_latest_packet, = self._dispersy._database.execute(u"SELECT packet FROM sync WHERE id = ?",
+                                                                      (the_latest_one[-1],)).next()
             except StopIteration:
                 pass
             else:
@@ -3489,8 +3487,9 @@ class Community(TaskManager):
                         self._dispersy._send_packets([msg.candidate], [str(the_latest_packet)],
                                                      self, "-caused by on_cancel-")
 
-        self._dispersy._database.executemany(u"UPDATE sync SET undone = ? "
-                                             u"WHERE community = ? AND member = ? AND global_time = ?", parameters)
+        if parameters:
+            self._dispersy._database.executemany(u"UPDATE sync SET undone = ? "
+                                                 u"WHERE community = ? AND member = ? AND global_time = ?", parameters)
 
         for meta, sub_messages in groupby(real_messages, key=lambda x: x.payload.packet.meta):
             meta.cancel_callback([(message.payload.member, message.payload.global_time, message.payload.packet)
