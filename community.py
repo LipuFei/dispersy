@@ -147,14 +147,17 @@ class Community(TaskManager):
 
                 # ensure that undo_callback is available
                 if message.undo_callback:
-                    # we do not support undo permissions for authorize, revoke, undo-own, undo-other,
-                    # cancel-own, and cancel-other (yet)
+                    # we do not support undo permissions for authorize, revoke, undo-own, and
+                    # undo-other (yet)
                     if not message.name in message_names:
                         permission_triplets.append((my_member, message, u"undo"))
 
-                # TODO: This is a DUPLICATE of undo, add comments after we remove undo.
+                # TODO(lfei): remove undo_callback part after we have completely removed the undo message
+                # TODO(lfei): make sure the comments are correct
+                # ensure that cancel_callback is available
                 if message.cancel_callback:
-                    if not message.name in message_names:
+                    # we do not support cancel permissions for authorize, revoke, cancel-own, and cancel-other (yet)
+                    if message.name not in message_names:
                         permission_triplets.append((my_member, message, u"cancel"))
 
             # grant authorize, revoke, and undo permission for messages that use PublicResolution
@@ -166,15 +169,18 @@ class Community(TaskManager):
             elif isinstance(message.distribution, SyncDistribution) and isinstance(message.resolution, PublicResolution):
                 # ensure that undo_callback is available
                 if message.undo_callback:
-                    # we do not support undo permissions for authorize, revoke, undo-own, undo-other,
-                    # cancel-own, and cancel-other (yet)
+                    # we do not support undo permissions for authorize, revoke, undo-own, and
+                    # undo-other (yet)
                     if not message.name in message_names:
                         for allowed in (u"authorize", u"revoke", u"undo"):
                             permission_triplets.append((my_member, message, allowed))
 
-                # TODO: This is a DUPLICATE of undo, add comments after we remove undo.
-                if message.undo_callback:
-                    if not message.name in message_names:
+                # TODO(lfei): remove undo_callback part after we have completely removed the undo message
+                # TODO(lfei): make sure the comments are correct
+                # ensure that cancel_callback is available
+                if message.cancel_callback:
+                    # we do not support cancel permissions for authorize, revoke, cancel-own, and cancel-other (yet)
+                    if message.name not in message_names:
                         for allowed in (u"authorize", u"revoke", u"cancel"):
                             if (my_member, message, allowed) not in permission_triplets:
                                 permission_triplets.append((my_member, message, allowed))
@@ -3310,6 +3316,7 @@ class Community(TaskManager):
             for meta, globaltime_range in changes.iteritems():
                 self._update_timerange(meta, globaltime_range[0], globaltime_range[1])
 
+    # TODO(lfei): make sure that the comments are correct
     def create_cancel(self, message, sign_with_master=False, store=True, update=True, forward=True):
         """
         Creates a cancel message to end the loop of undo messages.
@@ -3325,7 +3332,7 @@ class Community(TaskManager):
             assert isinstance(update, bool)
             assert isinstance(forward, bool)
             assert message.cancel_callback, "message does not allow cancel"
-            assert not message.name in (u"dispersy-cancel-own", u"dispersy-cancel-other",
+            assert message.name not in (u"dispersy-cancel-own", u"dispersy-cancel-other",
                                         u"dispersy-undo-own", u"dispersy-undo-other",
                                         u"dispersy-authorize", u"dispersy-revoke"),\
                 "Currently we do NOT support canceling any of these, as it has consequences for other messages"
@@ -3360,6 +3367,7 @@ class Community(TaskManager):
         self._dispersy.store_update_forward([msg], store, update, forward)
         return msg
 
+    # TODO(lfei): make sure that the comments are correct
     def check_cancel(self, messages):
         # Note: previously all MESSAGES have been checked to ensure that the sequence numbers are
         # correct.  this check takes into account the messages in the batch.  hence, if one of these
@@ -3399,6 +3407,7 @@ class Community(TaskManager):
 
             yield message
 
+    # TODO(lfei): make sure that the comments are correct
     def on_cancel(self, messages):
         """
         Cancels a single message.
@@ -3460,7 +3469,6 @@ class Community(TaskManager):
 
             # sort and get the latest one
             all_item_list.sort()
-            self._logger.debug("!!! %s", all_item_list)
             the_latest_one = all_item_list[-1]
             if not item.get("cancel_in_db", None) or the_latest_one[-1] != item["cancel_in_db"][-1]:
                 # need to update the undone pointer in database
@@ -3495,6 +3503,7 @@ class Community(TaskManager):
             meta.cancel_callback([(message.payload.member, message.payload.global_time, message.payload.packet)
                                   for message in sub_messages])
 
+    # TODO(lfei): remove this after we have completely removed the undo message
     def create_undo(self, message, sign_with_master=False, store=True, update=True, forward=True):
         """
         Create a dispersy-undo-own or dispersy-undo-other message to undo MESSAGE.
@@ -3567,6 +3576,7 @@ class Community(TaskManager):
                 self._dispersy.store_update_forward([msg], store, update, forward)
                 return msg
 
+    # TODO(lfei): remove this after we have completely removed the undo message
     def check_undo(self, messages):
         # Note: previously all MESSAGES have been checked to ensure that the sequence numbers are
         # correct.  this check takes into account the messages in the batch.  hence, if one of these
@@ -3665,6 +3675,7 @@ class Community(TaskManager):
 
             yield message
 
+    # TODO(lfei): remove this after we have completely removed the undo message
     def on_undo(self, messages):
         """
         Undo a single message.
