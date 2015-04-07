@@ -355,7 +355,7 @@ class DebugNode(object):
     assert_is_done = assert_is_stored
 
     @blocking_call_on_reactor_thread
-    def assert_is_canceled(self, message=None, messages=None, canceled_by=None):
+    def assert_is_cancelled(self, message=None, messages=None, cancelled_by=None):
         if messages is None:
             messages = [message]
 
@@ -366,12 +366,12 @@ class DebugNode(object):
                     u" WHERE sync.member = member.id AND community = ? AND mid = ? AND global_time = ?",
                     (self._community.database_id, buffer(message.authentication.member.mid),
                      message.distribution.global_time)).next()
-                self._testclass.assertGreater(undone, 0, "Message is not canceled")
-                if canceled_by:
+                self._testclass.assertGreater(undone, 0, "Message is not cancelled")
+                if cancelled_by:
                     undone, = self._dispersy.database.execute(
                         u"SELECT packet FROM sync WHERE id = ? ",
                         (undone,)).next()
-                    self._testclass.assertEqual(str(undone), canceled_by.packet)
+                    self._testclass.assertEqual(str(undone), cancelled_by.packet)
 
             except StopIteration:
                 self._testclass.fail("Message is not stored")

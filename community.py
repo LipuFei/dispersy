@@ -3322,7 +3322,7 @@ class Community(TaskManager):
         Creates a cancel message to end the loop of undo messages.
 
         A CANCEL message simply cancels another message and that's it. If a
-        person wants to enable the message that has been canceled, he has to
+        person wants to enable the message that has been cancelled, he has to
         create a new message with exactly the same content again.
         """
         if __debug__:
@@ -3446,7 +3446,7 @@ class Community(TaskManager):
 
                 categoried_msg_dict[key]["messages"].append(message)
 
-        # for each message to be canceled, check the cancel messages member global_time and mid
+        # for each message to be cancelled, check the cancel messages member global_time and mid
         # (the larger the later), and we only use the latest one.
         # The logic is that:
         # (1) if the latest message is already in our database:

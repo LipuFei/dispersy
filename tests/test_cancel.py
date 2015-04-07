@@ -17,7 +17,7 @@ class TestCancel(DispersyTestFunc):
         messages = [node.create_full_sync_text("Should cancel #%d" % i, i + 10) for i in xrange(10)]
         node.give_messages(messages, node)
 
-        # check that they are in the database and are NOT canceled
+        # check that they are in the database and are NOT cancelled
         node.assert_is_stored(messages=messages)
 
         # cancel all messages
@@ -25,8 +25,8 @@ class TestCancel(DispersyTestFunc):
 
         node.give_messages(cancels, node)
 
-        # check that they are in the database and ARE canceled
-        node.assert_is_canceled(messages=messages)
+        # check that they are in the database and ARE cancelled
+        node.assert_is_cancelled(messages=messages)
         node.assert_is_stored(messages=cancels)
 
     def test_node_cancel_other(self):
@@ -47,7 +47,7 @@ class TestCancel(DispersyTestFunc):
         messages = [other.create_full_sync_text("Should cancel #%d" % i, i + 10) for i in xrange(10)]
         node.give_messages(messages, other)
 
-        # check that they are in the database and are NOT canceled
+        # check that they are in the database and are NOT cancelled
         node.assert_is_stored(messages=messages)
 
         # NODE cancels all messages
@@ -55,8 +55,8 @@ class TestCancel(DispersyTestFunc):
                    for i, message in enumerate(messages)]
         node.give_messages(cancels, node)
 
-        # check that they are in the database and ARE canceled
-        node.assert_is_canceled(messages=messages)
+        # check that they are in the database and ARE cancelled
+        node.assert_is_cancelled(messages=messages)
         node.assert_is_stored(messages=cancels)
 
     def test_self_attempt_cancel_twice(self):
@@ -140,19 +140,19 @@ class TestCancel(DispersyTestFunc):
 
         self.assertEqual(len(cancel_packets), len([high_message.packet]))
 
-        # NODE should have both messages on the database and the lowest one should be canceled by the highest.
+        # NODE should have both messages on the database and the lowest one should be cancelled by the highest.
         messages = other.fetch_messages((u"dispersy-cancel-own",))
         self.assertEquals(len(messages), 2)
         other.assert_is_stored(low_message)
         other.assert_is_stored(high_message)
-        other.assert_is_canceled(message, canceled_by=high_message)
+        other.assert_is_cancelled(message, cancelled_by=high_message)
 
     def test_missing_message(self):
         """
         NODE generates a few messages without sending them to OTHER. Following, NODE cancels the
         messages and sends the cancel messages to OTHER. OTHER must now use a dispersy-missing-message
-        to request the messages that are about to be canceled. The messages need to be processed and
-        subsequently canceled.
+        to request the messages that are about to be cancelled. The messages need to be processed and
+        subsequently cancelled.
         """
         node, other = self.create_nodes(2)
         node.send_identity(other)
@@ -180,14 +180,14 @@ class TestCancel(DispersyTestFunc):
         # give all 'delayed' messages
         other.give_messages(messages, node)
 
-        # check that they are in the database and ARE canceled
-        other.assert_is_canceled(messages=messages)
+        # check that they are in the database and ARE cancelled
+        other.assert_is_cancelled(messages=messages)
         other.assert_is_stored(messages=cancels)
 
     def test_revoke_causing_cancel(self):
         """
         SELF gives NODE permission to cancel, OTHER created a message M1, NODE cancels the message with C1, SELF
-        revokes the cancel permission AFTER the message was canceled -> the message is not resumed.
+        revokes the cancel permission AFTER the message was cancelled -> the message is not resumed.
         """
         node, other = self.create_nodes(2)
         node.send_identity(other)
@@ -199,18 +199,18 @@ class TestCancel(DispersyTestFunc):
         other.give_message(authorize, self._mm)
 
         # OTHER creates a message
-        message = other.create_full_sync_text("will be canceled", 42)
+        message = other.create_full_sync_text("will be cancelled", 42)
         other.give_message(message, other)
         other.assert_is_stored(message)
 
         # NODE cancels the message
         cancel = node.create_cancel_other(message, message.distribution.global_time + 1)
         other.give_message(cancel, node)
-        other.assert_is_canceled(message, canceled_by=cancel)
+        other.assert_is_cancelled(message, cancelled_by=cancel)
         other.assert_is_stored(cancel)
 
         # SELF revoke cancel permission from NODE
         revoke = self._mm.create_revoke([(node.my_member, self._community.get_meta_message(u"full-sync-text"),
                                           u"cancel")])
         other.give_message(revoke, self._mm)
-        other.assert_is_canceled(message, canceled_by=cancel)
+        other.assert_is_cancelled(message, cancelled_by=cancel)
