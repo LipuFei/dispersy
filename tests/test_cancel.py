@@ -1,3 +1,5 @@
+from time import sleep
+
 from .dispersytestclass import DispersyTestFunc
 from ..util import blocking_call_on_reactor_thread
 
@@ -78,7 +80,6 @@ class TestCancel(DispersyTestFunc):
         cancel1 = node.call(create_cancel)
         self.assertIsNotNone(cancel1.packet)
 
-        self._logger.debug(u"!!!! second time")
         self.assertRaises(RuntimeError, create_cancel)
 
     def test_node_resolve_cancel_twice(self):
@@ -186,31 +187,50 @@ class TestCancel(DispersyTestFunc):
 
     def test_revoke_causing_cancel(self):
         """
-        SELF gives NODE permission to cancel, OTHER created a message M1, NODE cancels the message with C1, SELF
-        revokes the cancel permission AFTER the message was cancelled -> the message is not resumed.
+        3 peers: SELF, p1, p2
+        steps:
+        (1) SELF authorizes p1 to have cancel permission.
+        (2) p2 creates message m1.
+        (3) p1 creates message c1 to cancel m1.
+        (4) SELF revokes the cancel permission from p1.
+        (5) After (4), m1 should still be cancelled by c1.
         """
-        node, other = self.create_nodes(2)
-        node.send_identity(other)
+        p1, p2 = self.create_nodes(2)
+        p1.send_identity(p2)
 
         # MM grants cancel permission to NODE
-        authorize = self._mm.create_authorize([(node.my_member, self._community.get_meta_message(u"full-sync-text"),
+        authorize = self._mm.create_authorize([(p1.my_member, self._community.get_meta_message(u"full-sync-text"),
                                                 u"cancel")], self._mm.claim_global_time())
-        node.give_message(authorize, self._mm)
-        other.give_message(authorize, self._mm)
+        self._mm.give_message(authorize, self._mm)
+        p1.give_message(authorize, self._mm)
+        p2.give_message(authorize, self._mm)
+        sleep(1)
 
         # OTHER creates a message
-        message = other.create_full_sync_text("will be cancelled", 42)
-        other.give_message(message, other)
-        other.assert_is_stored(message)
+        m1 = p2.create_full_sync_text("will be cancelled", 10)
+        self._mm.give_message(m1, p2)
+        p2.give_message(m1, p2)
+        p1.give_message(m1, p2)
+        sleep(1)
+        p2.assert_is_stored(m1)
+        p1.assert_is_stored(m1)
 
         # NODE cancels the message
-        cancel = node.create_cancel_other(message, message.distribution.global_time + 1)
-        other.give_message(cancel, node)
-        other.assert_is_cancelled(message, cancelled_by=cancel)
-        other.assert_is_stored(cancel)
+        cancel = p1.create_cancel_other(m1, m1.distribution.global_time + 1)
+        p1.give_message(cancel, p1)
+        p2.give_message(cancel, p1)
+        self._mm.give_message(cancel, p1)
+        sleep(1)
+        p2.assert_is_cancelled(m1, cancelled_by=cancel)
+        p2.assert_is_stored(cancel)
 
         # SELF revoke cancel permission from NODE
-        revoke = self._mm.create_revoke([(node.my_member, self._community.get_meta_message(u"full-sync-text"),
-                                          u"cancel")])
-        other.give_message(revoke, self._mm)
-        other.assert_is_cancelled(message, cancelled_by=cancel)
+        revoke = self._mm.create_revoke([(p1.my_member, self._community.get_meta_message(u"full-sync-text"),
+                                          u"cancel")], self._mm.claim_global_time())
+        self._mm.give_message(revoke, self._mm)
+        p1.give_message(revoke, self._mm)
+        p2.give_message(revoke, self._mm)
+        sleep(1)
+
+        p1.assert_is_cancelled(m1, cancelled_by=cancel)
+        p2.assert_is_cancelled(m1, cancelled_by=cancel)
